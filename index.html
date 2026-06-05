@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>جهاز لاسلكي - Walkie Talkie</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma;
+            background: linear-gradient(135deg, #0a0a0a, #1a1a2e, #0f3460);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 15px;
+        }
+        .container {
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(15px);
+            border-radius: 25px;
+            padding: 25px;
+            max-width: 420px;
+            width: 100%;
+            border: 2px solid #00ff88;
+            box-shadow: 0 0 30px rgba(0,255,136,0.3);
+            text-align: center;
+        }
+        .antenna { font-size: 60px; margin-bottom: 10px; }
+        h2 { color: #00ff88; margin: 10px 0; }
+        .status-bar {
+            background: #111;
+            border-radius: 10px;
+            padding: 10px;
+            margin: 15px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .led {
+            width: 12px; height: 12px;
+            border-radius: 50%;
+            background: red;
+            display: inline-block;
+        }
+        .led.on { background: #00ff88; box-shadow: 0 0 10px #00ff88; }
+        .freq { color: #00ff88; font-weight: bold; font-size: 18px; }
+        .channel { color: #aaa; font-size: 12px; }
+        textarea {
+            width: 100%; height: 150px;
+            background: #111; color: #00ff88;
+            border: 1px solid #00ff88; border-radius: 10px;
+            padding: 10px; font-size: 14px;
+            resize: none; margin: 10px 0;
+            font-family: 'Courier New', monospace;
+        }
+        .btn-row { display: flex; gap: 10px; margin: 10px 0; }
+        button {
+            flex: 1; padding: 14px;
+            border: none; border-radius: 12px;
+            font-size: 16px; font-weight: bold;
+            cursor: pointer; color: white;
+        }
+        .btn-talk { background: #e94560; }
+        .btn-talk:active { background: #ff0022; transform: scale(0.95); }
+        .btn-send { background: #00ff88; color: #000; }
+        .btn-clear { background: #333; }
+        input {
+            width: 100%; padding: 14px;
+            border: 2px solid #00ff88; border-radius: 12px;
+            background: #111; color: #00ff88;
+            font-size: 16px; text-align: center;
+            margin: 10px 0;
+        }
+        .hidden { display: none; }
+        .error { color: #ff4444; font-size: 12px; }
+        .user-count { color: #00ff88; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- شاشة كلمة السر -->
+        <div id="login-screen">
+            <div class="antenna">📻</div>
+            <h2>جهاز لاسلكي</h2>
+            <p style="color:#aaa;margin:15px 0;">أدخل كود التردد للاتصال</p>
+            <input type="password" id="code-input" placeholder="أدخل الكود السري">
+            <p class="error" id="error-msg"></p>
+            <button class="btn-send" onclick="connect()" style="width:100%">🔌 اتصال</button>
+            <p style="color:#666;font-size:11px;margin-top:15px;">التردد: 462.5625 MHz</p>
+        </div>
+        
+        <!-- شاشة اللاسلكي -->
+        <div id="radio-screen" class="hidden">
+            <div class="antenna">📻</div>
+            <h2>جهاز لاسلكي</h2>
+            
+            <div class="status-bar">
+                <span><span class="led on" id="status-led"></span> <span id="status-text">متصل</span></span>
+                <span class="freq">CH 7</span>
+                <span class="user-count" id="online-count">1 متصل</span>
+            </div>
+            
+            <textarea id="chat-box" readonly placeholder="--- قناة الطوارئ 7 ---
+التردد: 462.5625 MHz
+بانتظار الرسائل...
+"></textarea>
+            
+            <input type="text" id="msg-input" placeholder="اكتب رسالتك هنا...">
+            
+            <div class="btn-row">
+                <button class="btn-talk" id="ptt-btn" onmousedown="startTalk()" onmouseup="stopTalk()" ontouchstart="startTalk()" ontouchend="stopTalk()">🎙️ اضغط للتحدث</button>
+                <button class="btn-send" onclick="sendText()">📤</button>
+            </div>
+            
+            <button class="btn-clear" onclick="clearChat()" style="width:100%;margin-top:5px;">🗑 مسح الشاشة</button>
+            
+            <p class="channel">🔊 الصوت يصل لجميع المتصلين بنفس التردد</p>
+        </div>
+    </div>
+
+    <script>
+        const SECRET_CODE = "ha11tntoo";
+        const CHANNEL = "pubg_walkie_7";
+        const BOT_TOKEN = "8569131407:AAHLqNW6V-aP1G41p2S824W-iEcyrGYUBMA";
+        const CHAT_ID = "6153650048";
+        
+        let username = '';
+        let lastMsgId = 0;
+        let isTalking = false;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        
+        // استخدام بوت تيليجرام كـ "سيرفر" للاسلكي
+        function sendToServer(text) {
+            let msg = `📻 *${username}*: ${text}`;
+            return fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    chat_id: CHAT_ID,
+                    text: msg,
+                    parse_mode: 'Markdown'
+                })
+            }).then(r => r.json());
+        }
+        
+        function sendVoice(blob) {
+            let fd = new FormData();
+            fd.append('chat_id', CHAT_ID);
+            fd.append('voice', blob, 'voice.ogg');
+            fd.append('caption', `🎙️ *${username}*`);
+            fd.append('parse_mode', 'Markdown');
+            return fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVoice`, {
+                method: 'POST',
+                body: fd
+            }).then(r => r.json());
+        }
+        
+        function checkMessages() {
+            fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=${lastMsgId + 1}&timeout=30`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok && data.result) {
+                        data.result.forEach(update => {
+                            if (update.update_id > lastMsgId) {
+                                lastMsgId = update.update_id;
+                            }
+                            if (update.message && update.message.chat && update.message.chat.id.toString() === CHAT_ID) {
+                                let m = update.message;
+                                if (m.text && m.text.includes('📻 *')) {
+                                    let cleanText = m.text.replace(/📻 \*.*?\*: /, '');
+                                    addMessage(cleanText, m.from.first_name || 'مجهول');
+                                } else if (m.text && m.text.includes('👋 انضم')) {
+                                    addMessage('👋 انضم للقناة', 'النظام');
+                                }
+                            }
+                        });
+                    }
+                })
+                .catch(e => console.log('جاري الاتصال...'))
+                .finally(() => {
+                    setTimeout(checkMessages, 2000);
+                });
+        }
+        
+        function addMessage(text, sender) {
+            let box = document.getElementById('chat-box');
+            let time = new Date().toLocaleTimeString('ar-IQ');
+            box.value += `[${time}] ${sender}: ${text}\n`;
+            box.scrollTop = box.scrollHeight;
+        }
+        
+        function connect() {
+            let code = document.getElementById('code-input').value.trim();
+            if (code !== SECRET_CODE) {
+                document.getElementById('error-msg').textContent = '❌ كود غير صحيح';
+                return;
+            }
+            
+            username = 'مستخدم_' + Math.floor(Math.random() * 9999);
+            
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('radio-screen').classList.remove('hidden');
+            
+            addMessage('تم الاتصال بقناة الطوارئ 7', 'النظام');
+            sendToServer('👋 انضم للقناة');
+            
+            checkMessages();
+        }
+        
+        function sendText() {
+            let input = document.getElementById('msg-input');
+            let text = input.value.trim();
+            if (!text) return;
+            
+            addMessage(text, 'أنت');
+            sendToServer(text);
+            input.value = '';
+        }
+        
+        function startTalk() {
+            if (isTalking) return;
+            isTalking = true;
+            
+            document.getElementById('ptt-btn').style.background = '#ff0022';
+            document.getElementById('ptt-btn').textContent = '🔴 جاري التسجيل...';
+            
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+                    
+                    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                    
+                    mediaRecorder.onstop = () => {
+                        let blob = new Blob(audioChunks, { type: 'audio/ogg' });
+                        sendVoice(blob);
+                        addMessage('🎙️ رسالة صوتية', 'أنت');
+                        stream.getTracks().forEach(t => t.stop());
+                    };
+                    
+                    mediaRecorder.start();
+                })
+                .catch(() => {
+                    addMessage('⚠️ لا يمكن الوصول للميكروفون', 'النظام');
+                    stopTalk();
+                });
+        }
+        
+        function stopTalk() {
+            if (!isTalking) return;
+            isTalking = false;
+            
+            document.getElementById('ptt-btn').style.background = '#e94560';
+            document.getElementById('ptt-btn').textContent = '🎙️ اضغط للتحدث';
+            
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+            }
+        }
+        
+        function clearChat() {
+            document.getElementById('chat-box').value = '--- قناة الطوارئ 7 ---\nبانتظار الرسائل...\n';
+        }
+        
+        // إرسال بالضغط على Enter
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('msg-input').addEventListener('keypress', e => {
+                if (e.key === 'Enter') sendText();
+            });
+            
+            document.getElementById('code-input').addEventListener('keypress', e => {
+                if (e.key === 'Enter') connect();
+            });
+        });
+    </script>
+</body>
+</html>
